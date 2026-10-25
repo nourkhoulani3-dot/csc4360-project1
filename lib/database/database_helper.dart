@@ -7,6 +7,7 @@ class DatabaseHelper {
   static final DatabaseHelper instance = DatabaseHelper._();
   static Database? _database;
 
+  // Open the database when needed.
   Future<Database> get database async {
     if (_database != null) {
       return _database!;
@@ -16,13 +17,14 @@ class DatabaseHelper {
     return _database!;
   }
 
+  // Open the database and create or upgrade its tables.
   Future<Database> _openDatabase() async {
     final databasePath = await getDatabasesPath();
     final path = join(databasePath, 'plot.db');
 
     return openDatabase(
       path,
-      version: 1,
+      version: 3,
       onConfigure: (db) async {
         await db.execute('PRAGMA foreign_keys = ON');
       },
@@ -43,6 +45,12 @@ class DatabaseHelper {
             start_time TEXT NOT NULL,
             end_time TEXT,
             duration_minutes INTEGER NOT NULL DEFAULT 0,
+            planned_duration_minutes INTEGER,
+            notes TEXT,
+            timer_type TEXT NOT NULL DEFAULT 'timed',
+            timer_started_at TEXT,
+            timer_resumed_at TEXT,
+            elapsed_seconds INTEGER NOT NULL DEFAULT 0,
             status TEXT NOT NULL DEFAULT 'completed',
             FOREIGN KEY (category_id)
               REFERENCES Categories(id)
@@ -59,6 +67,43 @@ class DatabaseHelper {
           )
         ''');
       },
+
+      // Upgrade older databases without deleting saved records.
+      onUpgrade: (db, oldVersion, newVersion) async {
+        if (oldVersion < 2) {
+          await db.execute('''
+            ALTER TABLE Activities
+            ADD COLUMN planned_duration_minutes INTEGER
+          ''');
+
+          await db.execute('''
+            ALTER TABLE Activities
+            ADD COLUMN notes TEXT
+          ''');
+
+          await db.execute('''
+            ALTER TABLE Activities
+            ADD COLUMN timer_type TEXT NOT NULL DEFAULT 'timed'
+          ''');
+        }
+
+        if (oldVersion < 3) {
+          await db.execute('''
+            ALTER TABLE Activities
+            ADD COLUMN timer_started_at TEXT
+          ''');
+
+          await db.execute('''
+            ALTER TABLE Activities
+            ADD COLUMN timer_resumed_at TEXT
+          ''');
+
+          await db.execute('''
+            ALTER TABLE Activities
+            ADD COLUMN elapsed_seconds INTEGER NOT NULL DEFAULT 0
+          ''');
+        }
+      },
     );
   }
 
@@ -72,6 +117,7 @@ class DatabaseHelper {
   // Get all saved categories.
   Future<List<Map<String, Object?>>> getCategories() async {
     final db = await database;
+
     return db.query('Categories', orderBy: 'name ASC');
   }
 
@@ -97,13 +143,33 @@ class DatabaseHelper {
   // Add a new activity.
   Future<int> addActivity(Map<String, Object?> activity) async {
     final db = await database;
+
     return db.insert('Activities', activity);
   }
 
   // Get activities, starting with the newest.
   Future<List<Map<String, Object?>>> getActivities() async {
     final db = await database;
+
     return db.query('Activities', orderBy: 'start_time DESC');
+  }
+
+  // Get one activity by its ID.
+  Future<Map<String, Object?>?> getActivityById(int id) async {
+    final db = await database;
+
+    final results = await db.query(
+      'Activities',
+      where: 'id = ?',
+      whereArgs: [id],
+      limit: 1,
+    );
+
+    if (results.isEmpty) {
+      return null;
+    }
+
+    return results.first;
   }
 
   // Get activities from one category.
@@ -150,6 +216,48 @@ class DatabaseHelper {
     return (result.first['total'] as num).toInt();
   }
 
+  // Get the last three completed activities for the smart helper.
+  Future<List<Map<String, Object?>>> getRecentCompletedActivities(
+    int categoryId,
+  ) async {
+    final db = await database;
+
+    return db.query(
+      'Activities',
+      where: '''
+        category_id = ?
+        AND status = ?
+        AND duration_minutes > 0
+      ''',
+      whereArgs: [categoryId, 'completed'],
+      orderBy: 'end_time DESC',
+      limit: 3,
+    );
+  }
+
+  // Save the current timer state to SQLite.
+  Future<int> saveTimerState(
+    int activityId, {
+    required String status,
+    required int elapsedSeconds,
+    String? startedAt,
+    String? resumedAt,
+  }) async {
+    final db = await database;
+
+    return db.update(
+      'Activities',
+      {
+        'status': status,
+        'elapsed_seconds': elapsedSeconds,
+        'timer_started_at': startedAt,
+        'timer_resumed_at': resumedAt,
+      },
+      where: 'id = ?',
+      whereArgs: [activityId],
+    );
+  }
+
   // Add or update a reflection for a specific day.
   Future<int> saveReflection(String date, int mood, String notes) async {
     final db = await database;
@@ -164,6 +272,7 @@ class DatabaseHelper {
   // Get all reflections, newest first.
   Future<List<Map<String, Object?>>> getReflections() async {
     final db = await database;
+
     return db.query('DailyReflections', orderBy: 'date DESC');
   }
 
