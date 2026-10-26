@@ -39,7 +39,7 @@ class PlotHomeScreen extends StatelessWidget {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            ElevatedButton.icon(
+            OutlinedButton.icon(
               onPressed: () {
                 Navigator.push(
                   context,
@@ -49,8 +49,8 @@ class PlotHomeScreen extends StatelessWidget {
               icon: const Icon(Icons.add),
               label: const Text('Add Activity'),
             ),
-            const SizedBox(height: 20),
-            ElevatedButton.icon(
+            const SizedBox(height: 16),
+            OutlinedButton.icon(
               onPressed: () {
                 Navigator.push(
                   context,
