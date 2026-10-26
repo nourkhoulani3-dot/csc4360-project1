@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../database/database_helper.dart';
+import 'activity_form_screen.dart';
 import 'activity_timer_screen.dart';
 
 class SavedActivitiesScreen extends StatefulWidget {
@@ -23,6 +24,24 @@ class _SavedActivitiesScreenState extends State<SavedActivitiesScreen> {
     setState(() {
       _activities = DatabaseHelper.instance.getActivities();
     });
+  }
+
+  Future<void> _openTimer(int id) async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => ActivityTimerScreen(activityId: id)),
+    );
+
+    if (mounted) _refresh();
+  }
+
+  Future<void> _editActivity(int id) async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => ActivityFormScreen(activityId: id)),
+    );
+
+    if (mounted) _refresh();
   }
 
   @override
@@ -63,19 +82,18 @@ class _SavedActivitiesScreenState extends State<SavedActivitiesScreen> {
                 leading: const Icon(Icons.timer_outlined),
                 title: Text(title),
                 subtitle: Text('Status: $status'),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () async {
-                  await Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => ActivityTimerScreen(activityId: id),
+                onTap: () => _openTimer(id),
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    IconButton(
+                      tooltip: 'Edit activity',
+                      icon: const Icon(Icons.edit_outlined),
+                      onPressed: () => _editActivity(id),
                     ),
-                  );
-
-                  if (context.mounted) {
-                    _refresh();
-                  }
-                },
+                    const Icon(Icons.chevron_right),
+                  ],
+                ),
               );
             },
           );
