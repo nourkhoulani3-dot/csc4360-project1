@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'screens/activity_form_screen.dart';
 import 'screens/saved_activities_screen.dart';
+import 'screens/history_screen.dart';
 
 void main() {
   runApp(const PlotApp());
@@ -60,6 +61,17 @@ class PlotHomeScreen extends StatelessWidget {
               },
               icon: const Icon(Icons.history),
               label: const Text('Saved Activities'),
+            ),
+            const SizedBox(height: 16),
+            OutlinedButton.icon(
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const HistoryScreen()),
+                );
+              },
+              icon: const Icon(Icons.bar_chart),
+              label: const Text('History / Statistics'),
             ),
           ],
         ),
