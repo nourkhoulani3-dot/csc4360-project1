@@ -1,82 +1,43 @@
+# Plot local duration helper
 
-# Plot Smart Helper
+## Purpose and method
+This is a local rule-based helper, not a trained model. It offers a starting session length for a category. It does not measure attention, diagnose phone addiction, or predict a user's mood. It uses no remote service.
 
-## Feature Overview
-Plot includes a local Smart Helper that recommends a duration when creating an activity.
+## Inputs and units
+The selected category ID and the three most recent completed activities in that category with a positive whole-minute duration, ordered by finish time. Recorded seconds are stored separately; completed whole minutes are rounded down. Zero-minute sessions are excluded. Manual completed activities count too. Running, paused and planned activities do not qualify.
 
-The goal is to help users plan their time based on their previous completed activities.
+## Rules and explanation
+If fewer than three qualifying activities exist, suggest 10 minutes and explain that history is limited. Otherwise sort the three durations, select the middle value (median), and limit the result to 10–60 minutes. Show the durations and the explanation before the user applies anything.
 
-## Method
-The Smart Helper uses a rule-based recommendation system. It does not use a trained AI model or an external API.
+Example: 15, 20, 45 minutes gives 20 minutes.
 
-It looks at the three most recent completed activities in the selected category and uses the median duration.
+## Baseline and alternative
+The baseline always suggests 25 minutes. A possible alternative is the arithmetic average. Median was selected because a single unusually long session changes the average more strongly. These choices do not demonstrate better focus or better wellbeing.
 
-The recommended duration is limited to a minimum of 10 minutes and a maximum of 60 minutes.
+## User control
+The user explicitly requests the suggestion and can apply it, dismiss it, choose another duration, or select an open timer. Suggestions can be disabled for a category; the preference is saved locally. Suggested minutes are a goal, not a forced stopping point. Tracking continues until Finish.
 
-If fewer than three completed activities are available, the helper recommends 10 minutes.
+## Five evaluation case types
+| Type | Input minutes | Expected helper | Baseline | What to check |
+| --- | --- | --- | --- | --- |
+| No history | none | 10 | 25 | Limited-history explanation |
+| Limited history | 45; or 15,45 | 10 | 25 | Fewer than three does not use median |
+| Normal history | 15,20,45 | 20 | 25 | Median and explanation |
+| Extreme history | 1,2,3; or 90,120,180 | 10; or 60 | 25 | Both limits |
+| Counterexample / override | 40,45,50, but only 10 minutes available today | 45, then user chooses 10 | 25 | History cannot know today's available time; override stays saved |
 
-## Inputs
-- Selected activity category
-- Durations of the last three completed activities in that category, measured in minutes
-- Completed activity records stored in SQLite
+## Validation status
+The pure Dart rule checks for the listed inputs passed on October 28, 2026. The baseline is the constant 25. These checks establish rule behavior, not recommendation quality. The counterexample produces an unsuitable 45-minute recommendation as expected.
 
-Canceled activities and activities with zero recorded minutes are excluded.
+Flutter test files are included, but the full Flutter suite and device override interaction have NOT been run in this environment. Run `flutter test` and record the actual device results below. Do not label pending checks as passed.
 
-## Why We Chose This Method
-The median is less affected by unusually long or short sessions than the mean.
+| Device / date | Explanation visible | Apply / dismiss | Override to 10 saves | Disable persists | Result / fixes |
+| --- | --- | --- | --- | --- | --- |
+| Pending | | | | | |
+| Pending | | | | | |
 
-For example, with durations of 15, 20, and 60 minutes, the median is 20 minutes.
+## Ownership and assistance
+Planned helper owner: Bryce Leidgertwood. This update includes AI-assisted implementation and test changes. Both members must review and understand their actual contributions and disclose assistance under the course rules; authorship and test evidence should reflect what each person actually did.
 
-This provides a simple recommendation that can work completely offline.
-
-## Baseline
-Our baseline is a fixed 25-minute recommendation, regardless of category or activity history.
-
-The Smart Helper is different because it adjusts its recommendation using the user's previous activity durations.
-
-## User Control
-The suggestion is optional.
-
-Users can:
-- Request a suggested duration
-- Read an explanation of the suggestion
-- Apply the suggested duration
-- Ignore the suggestion and enter their own duration
-
-The helper does not automatically save an activity.
-
-## Evaluation Plan
-
-| Case | Input durations (minutes) | Expected suggestion | Baseline | Status |
-|---|---|---|---|---|
-| Normal | 15, 20, 30 | 20 min | 25 min | Not yet verified |
-| Insufficient history | 15, 20 | 10 min | 25 min | Not yet verified |
-| Lower boundary | 2, 5, 8 | 10 min | 25 min | Not yet verified |
-| Upper boundary | 65, 75, 90 | 60 min | 25 min | Not yet verified |
-| Outlier | 15, 20, 60 | 20 min | 25 min | Not yet verified |
-
-These are expected results based on the rule, not claims that all five tests have passed.
-
-## Counterexample
-A user might have a history of 45-minute sessions but only have 10 minutes available today.
-
-The Smart Helper could suggest 45 minutes even though that is not appropriate for the user's current schedule.
-
-The user can override the suggestion manually.
-
-## Limitations
-- The helper only uses the last three completed activities.
-- It does not know the user's current availability or energy level.
-- Categories with limited history receive the same 10-minute fallback.
-- The recommendations are based on past behavior, not a trained prediction model.
-
-## Offline Operation
-The Smart Helper uses local SQLite activity records. It does not require internet access.
-
-## Future Improvements
-A future version could consider the user's available time, time of day, and a larger number of completed sessions.
-
-## Testing Status
-The helper's recommendation interface and median-based behavior have been tested during development.
-
-The full five-case evaluation is still pending. Expected values above must be compared against actual results before marking evaluation complete.
+## Limits
+Three past sessions can be unrepresentative. A completed manual entry may describe sleep or work rather than focused study. Category choice remains the user's responsibility. There is no trained model, learning process, confidence score, or evidence that these suggestions improve productivity. The evaluation described here is the undergraduate plan; any graduate held-out comparison cases still need to be added if applicable.

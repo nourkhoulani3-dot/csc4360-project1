@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../services/app_settings.dart';
+import 'categories_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key, required this.settings});
@@ -53,9 +54,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 value: settings.darkMode,
                 onChanged: _saving
                     ? null
-                    : (value) => _save(
-                          () => settings.setDarkMode(value),
-                        ),
+                    : (value) => _save(() => settings.setDarkMode(value)),
               ),
               const Divider(),
               Padding(
@@ -78,9 +77,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       ? null
                       : (value) {
                           if (value != null) {
-                            _save(
-                              () => settings.setDefaultMinutes(value),
-                            );
+                            _save(() => settings.setDefaultMinutes(value));
                           }
                         },
                 ),
@@ -92,9 +89,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 value: settings.animationsEnabled,
                 onChanged: _saving
                     ? null
-                    : (value) => _save(
-                          () => settings.setAnimationsEnabled(value),
-                        ),
+                    : (value) =>
+                          _save(() => settings.setAnimationsEnabled(value)),
+              ),
+              ListTile(
+                leading: const Icon(Icons.category_outlined),
+                title: const Text('Manage categories'),
+                subtitle: const Text(
+                  'Add, rename, recolor, or delete a category.',
+                ),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => Navigator.push<void>(
+                  context,
+                  MaterialPageRoute(builder: (_) => const CategoriesScreen()),
+                ),
               ),
               if (_saving) const LinearProgressIndicator(),
             ],

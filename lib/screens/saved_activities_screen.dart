@@ -1,104 +1,118 @@
 import 'package:flutter/material.dart';
 
 import '../database/database_helper.dart';
+import '../widgets/activity_card.dart';
 import 'activity_form_screen.dart';
-import 'activity_timer_screen.dart';
 
 class SavedActivitiesScreen extends StatefulWidget {
   const SavedActivitiesScreen({super.key});
-
   @override
   State<SavedActivitiesScreen> createState() => _SavedActivitiesScreenState();
 }
 
 class _SavedActivitiesScreenState extends State<SavedActivitiesScreen> {
-  late Future<List<Map<String, Object?>>> _activities;
-
+  List<Map<String, Object?>> _rows = [], _categories = [];
+  bool _loading = true;
+  String? _error;
+  int? _category;
   @override
   void initState() {
     super.initState();
-    _refresh();
+    _load();
   }
 
-  void _refresh() {
-    setState(() {
-      _activities = DatabaseHelper.instance.getActivities();
-    });
-  }
-
-  Future<void> _openTimer(int id) async {
-    await Navigator.push(
-      context,
-      MaterialPageRoute(builder: (_) => ActivityTimerScreen(activityId: id)),
-    );
-
-    if (mounted) _refresh();
-  }
-
-  Future<void> _editActivity(int id) async {
-    await Navigator.push(
-      context,
-      MaterialPageRoute(builder: (_) => ActivityFormScreen(activityId: id)),
-    );
-
-    if (mounted) _refresh();
+  Future<void> _load() async {
+    try {
+      final rows = await DatabaseHelper.instance.getActivities();
+      final categories = await DatabaseHelper.instance.getCategories();
+      if (mounted) {
+        setState(() {
+          _rows = rows;
+          _categories = categories;
+          _loading = false;
+          _error = null;
+          if (_category != null &&
+              !categories.any((c) => c['id'] == _category)) {
+            _category = null;
+          }
+        });
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _loading = false;
+          _error = 'Could not load activities.';
+        });
+      }
+    }
   }
 
   @override
   Widget build(BuildContext context) {
+    final rows = _rows
+        .where((r) => _category == null || r['category_id'] == _category)
+        .toList();
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Saved Activities'),
-        backgroundColor: Colors.green.shade100,
-      ),
-      body: FutureBuilder<List<Map<String, Object?>>>(
-        future: _activities,
-        builder: (context, snapshot) {
-          if (snapshot.hasError) {
-            return Center(
-              child: Text('Could not load activities: ${snapshot.error}'),
-            );
-          }
-
-          if (!snapshot.hasData) {
-            return const Center(child: CircularProgressIndicator());
-          }
-
-          final activities = snapshot.data!;
-
-          if (activities.isEmpty) {
-            return const Center(child: Text('No saved activities yet.'));
-          }
-
-          return ListView.builder(
-            itemCount: activities.length,
-            itemBuilder: (context, index) {
-              final activity = activities[index];
-              final id = activity['id'] as int;
-              final title = activity['title']?.toString() ?? 'Activity';
-              final status = activity['status']?.toString() ?? 'planned';
-
-              return ListTile(
-                leading: const Icon(Icons.timer_outlined),
-                title: Text(title),
-                subtitle: Text('Status: $status'),
-                onTap: () => _openTimer(id),
-                trailing: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    IconButton(
-                      tooltip: 'Edit activity',
-                      icon: const Icon(Icons.edit_outlined),
-                      onPressed: () => _editActivity(id),
-                    ),
-                    const Icon(Icons.chevron_right),
-                  ],
-                ),
-              );
-            },
+      appBar: AppBar(title: const Text('All activities')),
+      floatingActionButton: FloatingActionButton(
+        tooltip: 'Add activity',
+        onPressed: () async {
+          await Navigator.push<void>(
+            context,
+            MaterialPageRoute(builder: (_) => const ActivityFormScreen()),
           );
+          await _load();
         },
+        child: const Icon(Icons.add),
       ),
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : _error != null
+          ? Center(
+              child: TextButton(onPressed: _load, child: Text('$_error Retry')),
+            )
+          : RefreshIndicator(
+              onRefresh: _load,
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
+                children: [
+                  DropdownButtonFormField<int>(
+                    key: ValueKey(_category),
+                    initialValue: _category,
+                    decoration: const InputDecoration(
+                      labelText: 'Filter by category',
+                    ),
+                    items: [
+                      const DropdownMenuItem<int>(
+                        value: null,
+                        child: Text('All categories'),
+                      ),
+                      ..._categories.map(
+                        (c) => DropdownMenuItem<int>(
+                          value: c['id'] as int,
+                          child: Text(c['name'].toString()),
+                        ),
+                      ),
+                    ],
+                    onChanged: (value) => setState(() => _category = value),
+                  ),
+                  const SizedBox(height: 12),
+                  Text('${rows.length} activities'),
+                  if (rows.isEmpty)
+                    const Padding(
+                      padding: EdgeInsets.all(24),
+                      child: Text('No activities match this filter.'),
+                    ),
+                  ...rows.map(
+                    (row) => ActivityCard(
+                      activity: row,
+                      categories: _categories,
+                      onChanged: _load,
+                    ),
+                  ),
+                ],
+              ),
+            ),
     );
   }
 }

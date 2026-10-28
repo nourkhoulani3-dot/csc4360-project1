@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 
-import 'screens/activity_form_screen.dart';
-import 'screens/saved_activities_screen.dart';
+import 'screens/today_screen.dart';
 import 'screens/history_screen.dart';
 import 'screens/settings_screen.dart';
 import 'services/app_settings.dart';
@@ -64,9 +63,7 @@ class _PlotAppState extends State<PlotApp> {
               debugShowCheckedModeBanner: false,
               themeMode: settings.themeMode,
               theme: ThemeData(
-                colorScheme: ColorScheme.fromSeed(
-                  seedColor: Colors.green,
-                ),
+                colorScheme: ColorScheme.fromSeed(seedColor: Colors.green),
                 useMaterial3: true,
               ),
               darkTheme: ThemeData(
@@ -81,8 +78,8 @@ class _PlotAppState extends State<PlotApp> {
 
                 return MediaQuery(
                   data: media.copyWith(
-                    disableAnimations: media.disableAnimations ||
-                        !settings.animationsEnabled,
+                    disableAnimations:
+                        media.disableAnimations || !settings.animationsEnabled,
                   ),
                   child: child!,
                 );
@@ -97,10 +94,7 @@ class _PlotAppState extends State<PlotApp> {
 }
 
 class PlotHomeScreen extends StatefulWidget {
-  const PlotHomeScreen({
-    super.key,
-    required this.settings,
-  });
+  const PlotHomeScreen({super.key, required this.settings});
 
   final AppSettings settings;
 
@@ -141,60 +135,6 @@ class _PlotHomeScreenState extends State<PlotHomeScreen> {
             icon: Icon(Icons.settings_outlined),
             selectedIcon: Icon(Icons.settings),
             label: 'Settings',
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class TodayScreen extends StatelessWidget {
-  const TodayScreen({super.key});
-
-  Future<void> _openScreen(
-    BuildContext context,
-    Widget screen,
-  ) async {
-    await Navigator.push(
-      context,
-      MaterialPageRoute<void>(builder: (_) => screen),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Plot - Today'),
-      ),
-      body: ListView(
-        padding: const EdgeInsets.all(20),
-        children: [
-          Text(
-            'Your day, in color.',
-            style: Theme.of(context).textTheme.headlineSmall,
-          ),
-          const SizedBox(height: 8),
-          const Text(
-            'Record an activity to start seeing where your time goes.',
-          ),
-          const SizedBox(height: 24),
-          FilledButton.icon(
-            onPressed: () => _openScreen(
-              context,
-              const ActivityFormScreen(),
-            ),
-            icon: const Icon(Icons.add),
-            label: const Text('Add Activity'),
-          ),
-          const SizedBox(height: 12),
-          OutlinedButton.icon(
-            onPressed: () => _openScreen(
-              context,
-              const SavedActivitiesScreen(),
-            ),
-            icon: const Icon(Icons.list_alt),
-            label: const Text('Saved Activities'),
           ),
         ],
       ),

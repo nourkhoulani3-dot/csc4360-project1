@@ -1,716 +1,453 @@
 import 'package:flutter/material.dart';
 
 import '../database/database_helper.dart';
+import '../services/app_settings.dart';
 import '../services/smart_helper.dart';
 import 'activity_timer_screen.dart';
+import 'categories_screen.dart';
 
 class ActivityFormScreen extends StatefulWidget {
-  const ActivityFormScreen({super.key, this.activityId});
-
+  const ActivityFormScreen({
+    super.key,
+    this.activityId,
+    this.manual = false,
+    this.initialStart,
+    this.initialEnd,
+  });
   final int? activityId;
-
+  final bool manual;
+  final DateTime? initialStart;
+  final DateTime? initialEnd;
   @override
   State<ActivityFormScreen> createState() => _ActivityFormScreenState();
 }
 
 class _ActivityFormScreenState extends State<ActivityFormScreen> {
-  final TextEditingController _nameController = TextEditingController();
-  final TextEditingController _notesController = TextEditingController();
-
-  String _category = 'Studying';
-
-  bool _timed = true;
-  bool _startNow = true;
-  bool _isSaving = false;
-  bool _isLoading = false;
-  bool _timerStarted = false;
-  bool _isLoadingSuggestion = false;
-
-  int _hours = 1;
-  int _minutes = 0;
-  int _suggestionRequest = 0;
-
-  DateTime? _customStartTime;
-  Color _selectedColor = Colors.green;
-
+  final _name = TextEditingController();
+  final _notes = TextEditingController();
+  List<Map<String, Object?>> _categories = [];
+  int? _categoryId;
+  int _minutes = 25;
+  bool _openTimer = false;
+  bool _manual = false;
+  bool _loading = true;
+  bool _saving = false;
+  String? _error;
+  Map<String, Object?>? _existing;
   SmartHelperResult? _suggestion;
+  AppSettings? _settings;
+  late DateTime _start;
+  late DateTime _end;
 
-  final List<String> _categories = [
-    'Studying',
-    'Work',
-    'Break',
-    'Personal',
-    'Sleep',
-  ];
-
-  final List<Color> _colors = [
-    Colors.green,
-    Colors.purple,
-    Colors.red,
-    Colors.amber,
-  ];
-
-  bool get _isEditing => widget.activityId != null;
+  bool get _editing => widget.activityId != null;
+  bool get _locked => _existing != null && _existing!['status'] != 'planned';
 
   @override
   void initState() {
     super.initState();
+    final now = DateTime.now();
+    _start = widget.initialStart ?? now.subtract(const Duration(minutes: 25));
+    _end = widget.initialEnd ?? now;
+    _manual = widget.manual;
+    _load();
+  }
 
-    if (_isEditing) {
-      _loadActivity();
+  Future<void> _load() async {
+    try {
+      final db = DatabaseHelper.instance;
+      final settings = await AppSettings.load();
+      final categories = await db.getCategories();
+      final row = _editing
+          ? await db.getActivityById(widget.activityId!)
+          : null;
+      if (_editing && row == null) throw StateError('Activity not found.');
+      if (!mounted) return;
+      setState(() {
+        _settings = settings;
+        _categories = categories;
+        _minutes = settings.defaultMinutes;
+        _categoryId = categories.isEmpty ? null : categories.first['id'] as int;
+        if (row != null) {
+          _existing = row;
+          _name.text = row['title']?.toString() ?? '';
+          _notes.text = row['notes']?.toString() ?? '';
+          _categoryId = row['category_id'] as int?;
+          _minutes =
+              (row['planned_duration_minutes'] as num?)?.toInt() ?? _minutes;
+          _openTimer = row['planned_duration_minutes'] == null;
+          _manual = row['status'] == 'completed';
+          _start = DateTime.parse(row['start_time'] as String).toLocal();
+          _end =
+              DateTime.tryParse(row['end_time']?.toString() ?? '')?.toLocal() ??
+              _end;
+        }
+        _loading = false;
+        _error = null;
+      });
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _loading = false;
+          _error = 'Could not load the form. Tap Retry.';
+        });
+      }
     }
   }
 
-  Future<void> _loadActivity() async {
-    setState(() => _isLoading = true);
+  void _message(String text) {
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
+    }
+  }
 
+  Future<void> _manageCategories() async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute<void>(builder: (_) => const CategoriesScreen()),
+    );
     try {
-      final database = DatabaseHelper.instance;
-      final activity = await database.getActivityById(widget.activityId!);
-
-      if (activity == null) {
-        if (!mounted) return;
-        _showMessage('Activity not found.');
-        Navigator.pop(context);
-        return;
-      }
-
-      final categories = await database.getCategories();
-      final categoryId = activity['category_id'] as int?;
-
-      Map<String, Object?>? matchingCategory;
-
-      for (final category in categories) {
-        if (category['id'] == categoryId) {
-          matchingCategory = category;
-          break;
-        }
-      }
-
-      final savedCategory = matchingCategory?['name']?.toString() ?? 'Personal';
-
-      final savedColor = matchingCategory?['color'] as int?;
-
-      final plannedMinutes = (activity['planned_duration_minutes'] as num?)
-          ?.toInt();
-
-      final startTime = DateTime.tryParse(
-        activity['start_time']?.toString() ?? '',
-      );
-
-      final status = activity['status']?.toString() ?? 'planned';
-
+      final rows = await DatabaseHelper.instance.getCategories();
       if (!mounted) return;
-
       setState(() {
-        _nameController.text = activity['title']?.toString() ?? '';
-        _notesController.text = activity['notes']?.toString() ?? '';
-
-        if (!_categories.contains(savedCategory)) {
-          _categories.add(savedCategory);
-        }
-
-        _category = savedCategory;
-
-        if (savedColor != null) {
-          _selectedColor = Color(savedColor);
-        }
-
-        _timed = plannedMinutes != null;
-        _hours = (plannedMinutes ?? 60) ~/ 60;
-        _minutes = (plannedMinutes ?? 60) % 60;
-
-        _timerStarted = status != 'planned';
-
-        _startNow = true;
-        _customStartTime = startTime;
-        _isLoading = false;
+        _categories = rows;
+        if (!rows.any((r) => r['id'] == _categoryId)) _categoryId = null;
+        _suggestion = null;
       });
-    } catch (error) {
-      if (!mounted) return;
+    } catch (_) {
+      _message('Could not refresh categories.');
+    }
+  }
 
-      setState(() => _isLoading = false);
-      _showMessage('Could not load activity: $error');
+  Future<void> _suggest() async {
+    final id = _categoryId;
+    if (id == null) return;
+    setState(() => _saving = true);
+    try {
+      final value = await SmartHelper.suggestDuration(id);
+      if (mounted && id == _categoryId) setState(() => _suggestion = value);
+    } catch (_) {
+      _message('Could not load a suggestion. You can choose your own time.');
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  Future<void> _pickTime(bool start) async {
+    final old = start ? _start : _end;
+    final date = await showDatePicker(
+      context: context,
+      initialDate: old,
+      firstDate: DateTime(2000),
+      lastDate: DateTime(2100),
+    );
+    if (date == null || !mounted) return;
+    final time = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.fromDateTime(old),
+    );
+    if (time == null || !mounted) return;
+    setState(() {
+      final value = DateTime(
+        date.year,
+        date.month,
+        date.day,
+        time.hour,
+        time.minute,
+      );
+      if (start) {
+        _start = value;
+      } else {
+        _end = value;
+      }
+    });
+  }
+
+  String _timeLabel(DateTime value) =>
+      '${value.month}/${value.day}/${value.year} ${TimeOfDay.fromDateTime(value).format(context)}';
+
+  Future<void> _save() async {
+    if (_saving) return;
+    if (_name.text.trim().isEmpty) {
+      _message('Enter an activity name.');
+      return;
+    }
+    setState(() => _saving = true);
+    try {
+      final db = DatabaseHelper.instance;
+      int id;
+      // Completed records can keep their exact saved pause intervals unless
+      // the user deliberately changes their start or finish time.
+      final unchangedTimes =
+          _existing != null &&
+          _manual &&
+          DateTime.parse(_existing!['start_time'] as String)
+              .isAtSameMomentAs(_start) &&
+          DateTime.tryParse(_existing!['end_time']?.toString() ?? '')
+                  ?.isAtSameMomentAs(_end) ==
+              true;
+      if (_manual && !unchangedTimes) {
+        id = await db.saveManualActivity(
+          id: widget.activityId,
+          title: _name.text,
+          categoryId: _categoryId,
+          start: _start,
+          end: _end,
+          notes: _notes.text,
+        );
+      } else if (_editing) {
+        id = widget.activityId!;
+        final values = <String, Object?>{
+          'title': _name.text.trim(),
+          'category_id': _categoryId,
+          'notes': _notes.text.trim(),
+        };
+        if (!_locked) {
+          values.addAll({
+            'planned_duration_minutes': _openTimer ? null : _minutes,
+            'timer_type': _openTimer ? 'open' : 'timed',
+          });
+        }
+        if (await db.updateActivity(id, values) == 0) {
+          throw StateError('Activity not found.');
+        }
+      } else {
+        id = await db.addActivity({
+          'title': _name.text.trim(),
+          'category_id': _categoryId,
+          'notes': _notes.text.trim(),
+          'start_time': DateTime.now().toIso8601String(),
+          'status': 'planned',
+          'duration_minutes': 0,
+          'active_intervals': '[]',
+          'planned_duration_minutes': _openTimer ? null : _minutes,
+          'timer_type': _openTimer ? 'open' : 'timed',
+        });
+      }
+      if (!mounted) return;
+      if (!_editing && !_manual) {
+        await Navigator.push(
+          context,
+          MaterialPageRoute<void>(
+            builder: (_) => ActivityTimerScreen(activityId: id),
+          ),
+        );
+      }
+      if (mounted) Navigator.pop(context, true);
+    } catch (error) {
+      _message(
+        error
+            .toString()
+            .replaceFirst('Bad state: ', '')
+            .replaceFirst('Invalid argument(s): ', ''),
+      );
+    } finally {
+      if (mounted) setState(() => _saving = false);
     }
   }
 
   @override
   void dispose() {
-    _nameController.dispose();
-    _notesController.dispose();
+    _name.dispose();
+    _notes.dispose();
     super.dispose();
-  }
-
-  void _showMessage(String message) {
-    if (!mounted) return;
-
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(message)));
-  }
-
-  // Clear the previous suggestion when changing categories.
-  void _changeCategory(String category) {
-    setState(() {
-      _category = category;
-      _suggestion = null;
-      _isLoadingSuggestion = false;
-      _suggestionRequest++;
-    });
-  }
-
-  // Get a duration suggestion using completed activities.
-  Future<void> _loadSuggestion() async {
-    if (_timerStarted || _isLoadingSuggestion) return;
-
-    final requestedCategory = _category;
-    final requestId = ++_suggestionRequest;
-
-    setState(() {
-      _isLoadingSuggestion = true;
-      _suggestion = null;
-    });
-
-    try {
-      final categories = await DatabaseHelper.instance.getCategories();
-
-      final matches = categories.where(
-        (category) => category['name'] == requestedCategory,
-      );
-
-      final int? categoryId = matches.isEmpty
-          ? null
-          : matches.first['id'] as int;
-
-      SmartHelperResult result;
-
-      if (categoryId == null) {
-        result = SmartHelperResult(
-          suggestedMinutes: 10,
-          explanation:
-              'There are no completed sessions for $requestedCategory '
-              'yet, so 10 minutes is a starting suggestion.',
-          hasEnoughHistory: false,
-        );
-      } else {
-        result = await SmartHelper.suggestDuration(categoryId);
-      }
-
-      if (!mounted ||
-          requestId != _suggestionRequest ||
-          requestedCategory != _category) {
-        return;
-      }
-
-      setState(() {
-        _suggestion = result;
-        _isLoadingSuggestion = false;
-      });
-    } catch (error) {
-      if (!mounted || requestId != _suggestionRequest) return;
-
-      setState(() {
-        _suggestion = null;
-        _isLoadingSuggestion = false;
-      });
-
-      _showMessage('Could not load suggestion: $error');
-    }
-  }
-
-  // Only apply a suggestion when the user chooses to.
-  void _applySuggestion() {
-    if (_suggestion == null || _timerStarted) return;
-
-    final suggestedMinutes = _suggestion!.suggestedMinutes;
-
-    setState(() {
-      _timed = true;
-      _hours = suggestedMinutes ~/ 60;
-      _minutes = suggestedMinutes % 60;
-    });
-
-    _showMessage('Duration updated. You can still change it.');
-  }
-
-  Future<void> _chooseCustomStartTime() async {
-    final now = DateTime.now();
-
-    final selectedDate = await showDatePicker(
-      context: context,
-      initialDate: _customStartTime ?? now,
-      firstDate: DateTime(2020),
-      lastDate: DateTime(2100),
-    );
-
-    if (selectedDate == null || !mounted) return;
-
-    final selectedTime = await showTimePicker(
-      context: context,
-      initialTime: TimeOfDay.fromDateTime(_customStartTime ?? now),
-    );
-
-    if (selectedTime == null || !mounted) return;
-
-    setState(() {
-      _customStartTime = DateTime(
-        selectedDate.year,
-        selectedDate.month,
-        selectedDate.day,
-        selectedTime.hour,
-        selectedTime.minute,
-      );
-
-      _startNow = false;
-    });
-  }
-
-  Future<void> _saveActivity() async {
-    final activityName = _nameController.text.trim();
-
-    if (activityName.isEmpty) {
-      _showMessage('Enter an activity name');
-      return;
-    }
-
-    final plannedMinutes = (_hours * 60) + _minutes;
-
-    if (!_timerStarted && _timed && plannedMinutes == 0) {
-      _showMessage('Choose a duration');
-      return;
-    }
-
-    if (!_timerStarted && !_startNow && _customStartTime == null) {
-      _showMessage('Choose a custom start time');
-      return;
-    }
-
-    if (_isSaving) return;
-
-    setState(() => _isSaving = true);
-
-    try {
-      final database = DatabaseHelper.instance;
-      final categories = await database.getCategories();
-
-      final matchingCategories = categories.where(
-        (category) => category['name'] == _category,
-      );
-
-      int categoryId;
-
-      if (matchingCategories.isNotEmpty) {
-        categoryId = matchingCategories.first['id'] as int;
-
-        await database.updateCategory(
-          categoryId,
-          _category,
-          _selectedColor.toARGB32(),
-        );
-      } else {
-        categoryId = await database.addCategory(
-          _category,
-          _selectedColor.toARGB32(),
-        );
-      }
-
-      if (_isEditing) {
-        final changes = <String, Object?>{
-          'category_id': categoryId,
-          'title': activityName,
-          'notes': _notesController.text.trim(),
-        };
-
-        // Keep the timer history if the activity already started.
-        if (!_timerStarted) {
-          final startTime = _startNow ? DateTime.now() : _customStartTime!;
-
-          changes.addAll({
-            'start_time': startTime.toIso8601String(),
-            'planned_duration_minutes': _timed ? plannedMinutes : null,
-            'timer_type': _timed ? 'timed' : 'open',
-          });
-        }
-
-        await database.updateActivity(widget.activityId!, changes);
-
-        if (!mounted) return;
-
-        _showMessage('Activity updated successfully!');
-        Navigator.pop(context, true);
-      } else {
-        final startTime = _startNow ? DateTime.now() : _customStartTime!;
-
-        final activity = <String, Object?>{
-          'category_id': categoryId,
-          'title': activityName,
-          'start_time': startTime.toIso8601String(),
-          'end_time': null,
-          'duration_minutes': 0,
-          'planned_duration_minutes': _timed ? plannedMinutes : null,
-          'notes': _notesController.text.trim(),
-          'timer_type': _timed ? 'timed' : 'open',
-          'status': 'planned',
-        };
-
-        final activityId = await database.addActivity(activity);
-
-        if (!mounted) return;
-
-        if (activityId > 0) {
-          _showMessage('Activity saved successfully!');
-
-          await Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (context) => ActivityTimerScreen(activityId: activityId),
-            ),
-          );
-
-          if (!mounted) return;
-
-          _nameController.clear();
-          _notesController.clear();
-
-          setState(() {
-            _category = 'Studying';
-            _selectedColor = Colors.green;
-            _timed = true;
-            _startNow = true;
-            _customStartTime = null;
-            _hours = 1;
-            _minutes = 0;
-            _suggestion = null;
-            _isLoadingSuggestion = false;
-            _suggestionRequest++;
-          });
-        } else {
-          _showMessage('Activity could not be saved.');
-        }
-      }
-    } catch (error) {
-      _showMessage('Error saving activity: $error');
-    } finally {
-      if (mounted) {
-        setState(() => _isSaving = false);
-      }
-    }
   }
 
   @override
   Widget build(BuildContext context) {
-    if (_isLoading) {
+    if (_loading) {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
-
+    if (_error != null) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Activity')),
+        body: Center(
+          child: TextButton(onPressed: _load, child: Text(_error!)),
+        ),
+      );
+    }
+    final choices = <int>{
+      _minutes,
+      for (int n = 5; n <= 180; n += 5) n,
+    }.toList()..sort();
     return Scaffold(
-      appBar: AppBar(
-        title: Text(_isEditing ? 'Edit Activity' : 'Add / Edit Activity'),
-        backgroundColor: Colors.green.shade100,
-      ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+      appBar: AppBar(title: Text(_editing ? 'Edit activity' : 'Add activity')),
+      body: AbsorbPointer(
+        absorbing: _saving,
+        child: ListView(
+          padding: const EdgeInsets.all(20),
           children: [
-            const Text('Activity Name'),
-            const SizedBox(height: 8),
-
             TextField(
-              controller: _nameController,
+              controller: _name,
+              maxLength: 80,
               decoration: const InputDecoration(
+                labelText: 'Activity name',
                 border: OutlineInputBorder(),
-                hintText: 'e.g. Studying',
               ),
             ),
-
-            const SizedBox(height: 20),
-            const Text('Category'),
-
-            DropdownButtonFormField<String>(
-              key: ValueKey(_category),
-              initialValue: _category,
-              items: _categories.map((category) {
-                return DropdownMenuItem(value: category, child: Text(category));
-              }).toList(),
-              onChanged: (value) {
-                if (value != null) {
-                  _changeCategory(value);
-                }
-              },
+            const SizedBox(height: 16),
+            DropdownButtonFormField<int>(
+              key: ValueKey(_categoryId),
+              initialValue: _categoryId,
+              decoration: const InputDecoration(
+                labelText: 'Category',
+                border: OutlineInputBorder(),
+              ),
+              items: [
+                const DropdownMenuItem<int>(
+                  value: null,
+                  child: Text('Uncategorized'),
+                ),
+                ..._categories.map(
+                  (r) => DropdownMenuItem(
+                    value: r['id'] as int,
+                    child: Text(r['name'].toString()),
+                  ),
+                ),
+              ],
+              onChanged: (id) => setState(() {
+                _categoryId = id;
+                _suggestion = null;
+              }),
             ),
-
-            const SizedBox(height: 20),
-            const Text('Color'),
-            const SizedBox(height: 10),
-
-            Wrap(
-              spacing: 12,
-              children: _colors.map((color) {
-                return InkWell(
-                  onTap: () {
-                    setState(() => _selectedColor = color);
+            TextButton.icon(
+              onPressed: _manageCategories,
+              icon: const Icon(Icons.category_outlined),
+              label: const Text('Manage categories and colors'),
+            ),
+            if (!_editing)
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Log something I already did'),
+                value: _manual,
+                onChanged: (value) => setState(() {
+                  _manual = value;
+                  _suggestion = null;
+                }),
+              ),
+            if (_manual) ...[
+              OutlinedButton.icon(
+                onPressed: () => _pickTime(true),
+                icon: const Icon(Icons.schedule),
+                label: Text('Start: ${_timeLabel(_start)}'),
+              ),
+              OutlinedButton.icon(
+                onPressed: () => _pickTime(false),
+                icon: const Icon(Icons.schedule),
+                label: Text('Finish: ${_timeLabel(_end)}'),
+              ),
+              if (_existing != null)
+                const Text(
+                  'Changing times replaces any saved pauses with one continuous interval.',
+                ),
+            ] else if (!_locked) ...[
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Open timer'),
+                subtitle: const Text('Track without a time goal'),
+                value: _openTimer,
+                onChanged: (value) => setState(() => _openTimer = value),
+              ),
+              if (!_openTimer)
+                DropdownButtonFormField<int>(
+                  key: ValueKey('duration-$_minutes'),
+                  initialValue: _minutes,
+                  decoration: const InputDecoration(
+                    labelText: 'Planned minutes',
+                  ),
+                  items: choices
+                      .map(
+                        (n) => DropdownMenuItem(
+                          value: n,
+                          child: Text('$n minutes'),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: (value) {
+                    if (value != null) setState(() => _minutes = value);
                   },
-                  child: CircleAvatar(
-                    backgroundColor: color,
-                    child: _selectedColor == color
-                        ? const Icon(Icons.check, color: Colors.white)
-                        : null,
-                  ),
-                );
-              }).toList(),
-            ),
-
-            const SizedBox(height: 24),
-
-            // Local Smart Helper
-            const Text(
-              'Smart Helper',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-            ),
-
-            const SizedBox(height: 8),
-
-            const Text(
-              'Get a suggested session length based on your '
-              'previously completed activities.',
-            ),
-
-            const SizedBox(height: 12),
-
-            OutlinedButton.icon(
-              onPressed: _timerStarted || _isLoadingSuggestion
-                  ? null
-                  : _loadSuggestion,
-              icon: const Icon(Icons.lightbulb_outline),
-              label: const Text('Get Duration Suggestion'),
-            ),
-
-            if (_isLoadingSuggestion) ...[
-              const SizedBox(height: 12),
-              const CircularProgressIndicator(),
-            ],
-
-            if (_suggestion != null && !_timerStarted) ...[
-              const SizedBox(height: 12),
-
-              Card(
-                color: Colors.green.shade50,
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Suggested Duration: '
-                        '${_suggestion!.suggestedMinutes} minutes',
-                        style: const TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-
-                      const SizedBox(height: 8),
-
-                      Text(_suggestion!.explanation),
-
-                      const SizedBox(height: 8),
-
-                      const Text(
-                        'This is only a suggestion, not a guarantee. '
-                        'You can change the duration or use an open timer.',
-                        style: TextStyle(fontSize: 12),
-                      ),
-
-                      const SizedBox(height: 12),
-
-                      ElevatedButton(
-                        onPressed: _applySuggestion,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.green,
-                          foregroundColor: Colors.white,
-                        ),
-                        child: Text(
-                          'Apply ${_suggestion!.suggestedMinutes} Minutes',
-                        ),
-                      ),
-
-                      TextButton(
-                        onPressed: () {
-                          setState(() => _suggestion = null);
-                        },
-                        child: const Text('Dismiss Suggestion'),
-                      ),
-                    ],
-                  ),
                 ),
-              ),
-            ],
-
-            if (_timerStarted) ...[
-              const SizedBox(height: 8),
-              const Text(
-                'Suggestions are unavailable after the timer starts.',
-                style: TextStyle(color: Colors.grey),
-              ),
-            ],
-
-            const SizedBox(height: 24),
-            const Text('Duration'),
-            const SizedBox(height: 8),
-
-            SegmentedButton<bool>(
-              segments: const [
-                ButtonSegment(value: true, label: Text('Timed')),
-                ButtonSegment(value: false, label: Text('Open Timer')),
-              ],
-              selected: {_timed},
-              onSelectionChanged: _timerStarted
-                  ? null
-                  : (value) {
-                      setState(() => _timed = value.first);
-                    },
-            ),
-
-            if (_timed) ...[
-              const SizedBox(height: 16),
-
-              Row(
-                children: [
-                  Expanded(
-                    child: DropdownButtonFormField<int>(
-                      key: ValueKey('hours-$_hours'),
-                      initialValue: _hours,
-                      decoration: const InputDecoration(labelText: 'Hours'),
-                      items: List.generate(13, (i) {
-                        return DropdownMenuItem(value: i, child: Text('$i hr'));
-                      }),
-                      onChanged: _timerStarted
-                          ? null
-                          : (value) {
-                              if (value != null) {
-                                setState(() => _hours = value);
-                              }
-                            },
-                    ),
-                  ),
-
-                  const SizedBox(width: 12),
-
-                  Expanded(
-                    child: DropdownButtonFormField<int>(
-                      key: ValueKey('minutes-$_minutes'),
-                      initialValue: _minutes,
-                      decoration: const InputDecoration(labelText: 'Minutes'),
-                      items: List.generate(60, (i) {
-                        return DropdownMenuItem(
-                          value: i,
-                          child: Text('$i min'),
-                        );
-                      }),
-                      onChanged: _timerStarted
-                          ? null
-                          : (value) {
-                              if (value != null) {
-                                setState(() => _minutes = value);
-                              }
-                            },
-                    ),
-                  ),
-                ],
-              ),
-            ],
-
-            const SizedBox(height: 20),
-
-            if (!_timerStarted) ...[
-              SegmentedButton<bool>(
-                segments: const [
-                  ButtonSegment(value: true, label: Text('Now')),
-                  ButtonSegment(value: false, label: Text('Custom')),
-                ],
-                selected: {_startNow},
-                onSelectionChanged: (value) {
-                  final useNow = value.first;
-
-                  setState(() => _startNow = useNow);
-
-                  if (!useNow) {
-                    _chooseCustomStartTime();
-                  }
-                },
-              ),
-
-              if (!_startNow) ...[
-                const SizedBox(height: 12),
-
-                OutlinedButton.icon(
-                  onPressed: _chooseCustomStartTime,
-                  icon: const Icon(Icons.calendar_today),
-                  label: Text(
-                    _customStartTime == null
-                        ? 'Choose date and time'
-                        : 'Selected: ${_customStartTime!.month}/'
-                              '${_customStartTime!.day}/'
-                              '${_customStartTime!.year} '
-                              '${TimeOfDay.fromDateTime(_customStartTime!).format(context)}',
-                  ),
+              if (_categoryId != null)
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Duration suggestions for this category'),
+                  value: _settings?.suggestionsEnabledFor(_categoryId!) ?? true,
+                  onChanged: (value) async {
+                    try {
+                      await _settings!.setSuggestionsEnabledFor(
+                        _categoryId!,
+                        value,
+                      );
+                      if (mounted) setState(() => _suggestion = null);
+                    } catch (_) {
+                      _message('Could not save suggestion preference.');
+                    }
+                  },
                 ),
-              ],
-            ] else ...[
-              const Text(
-                'Timer settings are locked because this activity '
-                'has already started.',
-                style: TextStyle(color: Colors.grey),
+              OutlinedButton.icon(
+                onPressed:
+                    _categoryId == null ||
+                        !(_settings?.suggestionsEnabledFor(_categoryId!) ??
+                            true)
+                    ? null
+                    : _suggest,
+                icon: const Icon(Icons.lightbulb_outline),
+                label: const Text('Suggest a duration'),
               ),
-            ],
-
-            const SizedBox(height: 20),
-            const Text('Notes (optional)'),
-            const SizedBox(height: 8),
-
-            TextField(
-              controller: _notesController,
-              maxLines: 3,
-              decoration: const InputDecoration(
-                border: OutlineInputBorder(),
-                hintText: 'Enter notes...',
-              ),
-            ),
-
-            const SizedBox(height: 24),
-
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton(
-                    onPressed: _isSaving ? null : () => Navigator.pop(context),
-                    child: const Text('Cancel'),
-                  ),
-                ),
-
-                const SizedBox(width: 12),
-
-                Expanded(
-                  child: ElevatedButton(
-                    onPressed: _isSaving ? null : _saveActivity,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.green,
-                      foregroundColor: Colors.white,
-                    ),
-                    child: _isSaving
-                        ? const SizedBox(
-                            height: 20,
-                            width: 20,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: Colors.white,
+              if (_suggestion != null)
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(_suggestion!.explanation),
+                        Wrap(
+                          spacing: 12,
+                          children: [
+                            TextButton(
+                              onPressed: () => setState(() {
+                                _minutes = _suggestion!.suggestedMinutes;
+                                _openTimer = false;
+                              }),
+                              child: Text(
+                                'Apply ${_suggestion!.suggestedMinutes} minutes',
+                              ),
                             ),
-                          )
-                        : Text(_isEditing ? 'Save Changes' : 'Save'),
+                            TextButton(
+                              onPressed: () =>
+                                  setState(() => _suggestion = null),
+                              child: const Text('Dismiss'),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
                   ),
                 ),
-              ],
+            ] else
+              const Text(
+                'Finish or reset the timer before changing its duration.',
+              ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: _notes,
+              minLines: 3,
+              maxLines: 6,
+              decoration: const InputDecoration(
+                labelText: 'Notes (optional)',
+                border: OutlineInputBorder(),
+              ),
             ),
+            const SizedBox(height: 20),
+            FilledButton(
+              onPressed: _save,
+              child: Text(_saving ? 'Saving...' : 'Save'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
+            if (_saving) const LinearProgressIndicator(),
           ],
         ),
       ),

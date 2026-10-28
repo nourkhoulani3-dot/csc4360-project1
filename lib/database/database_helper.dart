@@ -1,3 +1,7 @@
+import 'dart:convert';
+
+import '../services/activity_time.dart';
+
 import 'package:path/path.dart';
 import 'package:sqflite/sqflite.dart';
 
@@ -24,7 +28,7 @@ class DatabaseHelper {
 
     return openDatabase(
       path,
-      version: 3,
+      version: 4,
       onConfigure: (db) async {
         await db.execute('PRAGMA foreign_keys = ON');
       },
@@ -51,6 +55,7 @@ class DatabaseHelper {
             timer_started_at TEXT,
             timer_resumed_at TEXT,
             elapsed_seconds INTEGER NOT NULL DEFAULT 0,
+            active_intervals TEXT,
             status TEXT NOT NULL DEFAULT 'completed',
             FOREIGN KEY (category_id)
               REFERENCES Categories(id)
@@ -62,14 +67,60 @@ class DatabaseHelper {
           CREATE TABLE DailyReflections (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             date TEXT NOT NULL UNIQUE,
-            mood INTEGER NOT NULL,
+            mood INTEGER,
             notes TEXT
           )
         ''');
       },
 
+      onOpen: (db) async {
+        await db.execute(
+          'CREATE TABLE IF NOT EXISTS PlotMetadata (key TEXT PRIMARY KEY)',
+        );
+        final seeded = await db.query(
+          'PlotMetadata',
+          where: 'key = ?',
+          whereArgs: ['categories_seeded'],
+        );
+        if (seeded.isEmpty) {
+          await db.transaction((txn) async {
+            final existing = await txn.query('Categories');
+            if (existing.isEmpty) {
+              for (final entry in <String, int>{
+                'Studying': 0xFF6750A4,
+                'Work': 0xFF00796B,
+                'Rest': 0xFF1976D2,
+                'Sleep': 0xFF3949AB,
+                'Personal': 0xFFEF6C00,
+              }.entries) {
+                await txn.insert('Categories', {
+                  'name': entry.key,
+                  'color': entry.value,
+                });
+              }
+            }
+            await txn.insert('PlotMetadata', {'key': 'categories_seeded'});
+          });
+        }
+      },
+
       // Upgrade older databases without deleting saved records.
       onUpgrade: (db, oldVersion, newVersion) async {
+        if (oldVersion < 4) {
+          await db.execute(
+            'ALTER TABLE Activities ADD COLUMN active_intervals TEXT',
+          );
+          await db.execute(
+            'ALTER TABLE DailyReflections RENAME TO OldReflections',
+          );
+          await db.execute(
+            'CREATE TABLE DailyReflections (id INTEGER PRIMARY KEY AUTOINCREMENT, date TEXT NOT NULL UNIQUE, mood INTEGER, notes TEXT)',
+          );
+          await db.execute(
+            'INSERT INTO DailyReflections SELECT id, date, mood, notes FROM OldReflections',
+          );
+          await db.execute('DROP TABLE OldReflections');
+        }
         if (oldVersion < 2) {
           await db.execute('''
             ALTER TABLE Activities
@@ -235,31 +286,168 @@ class DatabaseHelper {
     );
   }
 
-  // Save the current timer state to SQLite.
-  Future<int> saveTimerState(
-    int activityId, {
-    required String status,
-    required int elapsedSeconds,
-    String? startedAt,
-    String? resumedAt,
-  }) async {
+  // All timer changes are committed before the UI changes.
+  Future<void> changeTimer(int id, String action) async {
     final db = await database;
+    await db.transaction((txn) async {
+      final rows = await txn.query(
+        'Activities',
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+      if (rows.isEmpty) throw StateError('Activity no longer exists.');
+      final row = rows.first;
+      final status = row['status'];
+      if (status == 'completed') {
+        throw StateError('This activity is already finished.');
+      }
+      final now = DateTime.now();
+      final encoded = row['active_intervals']?.toString();
+      final intervals = encoded == null
+          ? activityPeriods({...row, 'status': 'paused'})
+                .map<dynamic>(
+                  (p) => {
+                    'start': p.start.toIso8601String(),
+                    'end': p.end.toIso8601String(),
+                  },
+                )
+                .toList()
+          : jsonDecode(encoded) as List<dynamic>;
+      var seconds = (row['elapsed_seconds'] as num?)?.toInt() ?? 0;
+      final resumed = DateTime.tryParse(
+        row['timer_resumed_at']?.toString() ?? '',
+      );
+      if (status == 'running' && resumed != null) {
+        final extra = now.difference(resumed).inSeconds;
+        if (extra > 0) {
+          seconds += extra;
+          intervals.add({
+            'start': resumed.toIso8601String(),
+            'end': now.toIso8601String(),
+          });
+        }
+      }
+      final changes = <String, Object?>{
+        'elapsed_seconds': seconds,
+        'active_intervals': jsonEncode(intervals),
+        'timer_resumed_at': null,
+      };
+      if (action == 'start') {
+        if (status == 'running') return;
+        final running = await txn.query(
+          'Activities',
+          where: "status = 'running' AND id != ?",
+          whereArgs: [id],
+        );
+        if (running.isNotEmpty) {
+          throw StateError('Pause or finish the other running activity first.');
+        }
+        changes.addAll({
+          'status': 'running',
+          'timer_started_at': row['timer_started_at'] ?? now.toIso8601String(),
+          'start_time': row['timer_started_at'] == null
+              ? now.toIso8601String()
+              : row['start_time'],
+          'timer_resumed_at': now.toIso8601String(),
+        });
+      } else if (action == 'pause') {
+        if (status != 'running') return;
+        changes['status'] = 'paused';
+      } else if (action == 'finish') {
+        if (row['timer_started_at'] == null) {
+          throw StateError('Start the timer first.');
+        }
+        changes.addAll({
+          'status': 'completed',
+          'end_time': now.toIso8601String(),
+          'start_time': row['timer_started_at'],
+          'duration_minutes': seconds ~/ 60,
+          'timer_started_at': null,
+        });
+      } else if (action == 'reset') {
+        changes.addAll({
+          'status': 'planned',
+          'elapsed_seconds': 0,
+          'active_intervals': '[]',
+          'duration_minutes': 0,
+          'timer_started_at': null,
+          'end_time': null,
+        });
+      } else {
+        throw ArgumentError('Unknown timer action.');
+      }
+      await txn.update('Activities', changes, where: 'id = ?', whereArgs: [id]);
+    });
+  }
 
-    return db.update(
-      'Activities',
-      {
-        'status': status,
-        'elapsed_seconds': elapsedSeconds,
-        'timer_started_at': startedAt,
-        'timer_resumed_at': resumedAt,
-      },
-      where: 'id = ?',
-      whereArgs: [activityId],
-    );
+  // Validate and save manual entries in a transaction. Pauses in other records
+  // remain available for separate activities instead of blocking the whole span.
+  Future<int> saveManualActivity({
+    int? id,
+    required String title,
+    int? categoryId,
+    required DateTime start,
+    required DateTime end,
+    required String notes,
+  }) async {
+    if (title.trim().isEmpty) throw ArgumentError('Enter an activity name.');
+    if (!end.isAfter(start)) {
+      throw ArgumentError('Finish time must be after start time.');
+    }
+    if (end.isAfter(DateTime.now())) {
+      throw ArgumentError('Recorded activities cannot end in the future.');
+    }
+    final db = await database;
+    return db.transaction((txn) async {
+      final all = await txn.query('Activities');
+      final candidate = ActivePeriod(start, end);
+      for (final row in all) {
+        if (row['id'] == id || row['status'] == 'planned') continue;
+        if (activityPeriods(row).any((p) => periodsOverlap(candidate, p))) {
+          throw StateError(
+            'This overlaps "${row['title']}". Adjust the times first.',
+          );
+        }
+      }
+      if (id != null) {
+        final old = all.where((r) => r['id'] == id);
+        if (old.isEmpty) throw StateError('Activity no longer exists.');
+        if (old.first['status'] != 'completed') {
+          throw StateError('Finish the timer before correcting its times.');
+        }
+      }
+      final seconds = end.difference(start).inSeconds;
+      final values = <String, Object?>{
+        'title': title.trim(),
+        'category_id': categoryId,
+        'start_time': start.toIso8601String(),
+        'end_time': end.toIso8601String(),
+        'duration_minutes': seconds ~/ 60,
+        'elapsed_seconds': seconds,
+        'planned_duration_minutes': null,
+        'timer_type': 'manual',
+        'notes': notes.trim(),
+        'status': 'completed',
+        'timer_started_at': null,
+        'timer_resumed_at': null,
+        'active_intervals': jsonEncode([
+          {'start': start.toIso8601String(), 'end': end.toIso8601String()},
+        ]),
+      };
+      if (id == null) return txn.insert('Activities', values);
+      final count = await txn.update(
+        'Activities',
+        values,
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+      if (count == 0) throw StateError('Activity no longer exists.');
+      return id;
+    });
   }
 
   // Add or update a reflection for a specific day.
-  Future<int> saveReflection(String date, int mood, String notes) async {
+  Future<int> saveReflection(String date, int? mood, String notes) async {
     final db = await database;
 
     return db.insert('DailyReflections', {

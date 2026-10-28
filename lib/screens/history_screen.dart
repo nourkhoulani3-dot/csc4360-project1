@@ -1,247 +1,172 @@
 import 'package:flutter/material.dart';
 
 import '../database/database_helper.dart';
+import '../services/activity_time.dart';
+import 'today_screen.dart';
+import 'reflection_screen.dart';
 
 class HistoryScreen extends StatefulWidget {
   const HistoryScreen({super.key});
-
   @override
   State<HistoryScreen> createState() => _HistoryScreenState();
 }
 
 class _HistoryScreenState extends State<HistoryScreen> {
+  List<Map<String, Object?>> _rows = [], _categories = [], _reflections = [];
   bool _loading = true;
+  int? _category;
   String? _error;
-
-  List<Map<String, Object?>> _activities = [];
-  List<Map<String, Object?>> _categories = [];
-
-  int? _selectedCategoryId;
-
   @override
   void initState() {
     super.initState();
-    _loadHistory();
+    _load();
   }
 
-  // Load saved activities and categories from SQLite.
-  Future<void> _loadHistory() async {
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
-
+  Future<void> _load() async {
     try {
-      final database = DatabaseHelper.instance;
-
-      final activities = await database.getActivities();
-      final categories = await database.getCategories();
-
-      if (!mounted) return;
-
-      setState(() {
-        _activities = activities;
-        _categories = categories;
-        _loading = false;
-      });
-    } catch (error) {
-      if (!mounted) return;
-
-      setState(() {
-        _error = error.toString();
-        _loading = false;
-      });
-    }
-  }
-
-  // Filter activities by the selected category.
-  List<Map<String, Object?>> get _filteredActivities {
-    if (_selectedCategoryId == null) {
-      return _activities;
-    }
-
-    return _activities.where((activity) {
-      return activity['category_id'] == _selectedCategoryId;
-    }).toList();
-  }
-
-  // Only completed activities count toward recorded time.
-  int get _totalMinutes {
-    int total = 0;
-
-    for (final activity in _filteredActivities) {
-      if (activity['status'] == 'completed') {
-        total += (activity['duration_minutes'] as num?)?.toInt() ?? 0;
+      final db = DatabaseHelper.instance;
+      final rows = await db.getActivities();
+      final categories = await db.getCategories();
+      final reflections = await db.getReflections();
+      if (mounted) {
+        setState(() {
+          _rows = rows;
+          _categories = categories;
+          _reflections = reflections;
+          _loading = false;
+          _error = null;
+          if (_category != null &&
+              !categories.any((c) => c['id'] == _category)) {
+            _category = null;
+          }
+        });
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _loading = false;
+          _error = 'Could not load history.';
+        });
       }
     }
-
-    return total;
-  }
-
-  String _formatMinutes(int totalMinutes) {
-    final hours = totalMinutes ~/ 60;
-    final minutes = totalMinutes % 60;
-
-    if (hours == 0) {
-      return '$minutes min';
-    }
-
-    return '$hours hr $minutes min';
-  }
-
-  String _formatDate(String? dateString) {
-    if (dateString == null) return 'Unknown date';
-
-    final date = DateTime.tryParse(dateString);
-
-    if (date == null) return 'Unknown date';
-
-    return '${date.month}/${date.day}/${date.year}';
-  }
-
-  String _categoryName(Object? categoryId) {
-    for (final category in _categories) {
-      if (category['id'] == categoryId) {
-        return category['name']?.toString() ?? 'Uncategorized';
-      }
-    }
-
-    return 'Uncategorized';
   }
 
   @override
   Widget build(BuildContext context) {
-    final filtered = _filteredActivities;
-
+    final rows = _rows
+        .where((r) => _category == null || r['category_id'] == _category)
+        .toList();
+    final dates = <String>{};
+    final now = DateTime.now();
+    for (final row in rows) {
+      for (final period in activityPeriods(row, now: now)) {
+        var day = DateTime(
+          period.start.year,
+          period.start.month,
+          period.start.day,
+        );
+        while (day.isBefore(period.end)) {
+          dates.add(dateKey(day));
+          day = DateTime(day.year, day.month, day.day + 1);
+        }
+      }
+    }
+    if (_category == null) {
+      dates.addAll(_reflections.map((r) => r['date'].toString()));
+    }
+    final days = dates.toList()..sort((a, b) => b.compareTo(a));
+    final total = rows.fold<Duration>(
+      Duration.zero,
+      (sum, row) =>
+          sum +
+          activityPeriods(
+            row,
+            now: now,
+          ).fold<Duration>(Duration.zero, (value, p) => value + p.duration),
+    );
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('History / Statistics'),
-        backgroundColor: Colors.green.shade100,
-      ),
+      appBar: AppBar(title: const Text('History / Insights')),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _error != null
           ? Center(
-              child: Padding(
-                padding: const EdgeInsets.all(20),
-                child: Text('Could not load history: $_error'),
-              ),
+              child: TextButton(onPressed: _load, child: Text('$_error Retry')),
             )
           : RefreshIndicator(
-              onRefresh: _loadHistory,
+              onRefresh: _load,
               child: ListView(
-                padding: const EdgeInsets.all(20),
+                padding: const EdgeInsets.all(16),
                 children: [
-                  const Text(
-                    'Activity History',
-                    style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
-                  ),
-
-                  const SizedBox(height: 20),
-
-                  // Filter activities by category.
-                  DropdownButtonFormField<int?>(
-                    key: ValueKey(_selectedCategoryId),
-                    initialValue: _selectedCategoryId,
+                  DropdownButtonFormField<int>(
+                    key: ValueKey(_category),
+                    initialValue: _category,
                     decoration: const InputDecoration(
-                      labelText: 'Filter by Category',
-                      border: OutlineInputBorder(),
+                      labelText: 'Filter by category',
                     ),
                     items: [
-                      const DropdownMenuItem<int?>(
+                      const DropdownMenuItem<int>(
                         value: null,
-                        child: Text('All Categories'),
+                        child: Text('All categories'),
                       ),
-                      ..._categories.map((category) {
-                        return DropdownMenuItem<int?>(
-                          value: category['id'] as int,
-                          child: Text(
-                            category['name']?.toString() ?? 'Category',
-                          ),
-                        );
-                      }),
+                      ..._categories.map(
+                        (c) => DropdownMenuItem<int>(
+                          value: c['id'] as int,
+                          child: Text(c['name'].toString()),
+                        ),
+                      ),
                     ],
-                    onChanged: (value) {
-                      setState(() {
-                        _selectedCategoryId = value;
-                      });
-                    },
+                    onChanged: (value) => setState(() => _category = value),
                   ),
-
-                  const SizedBox(height: 24),
-
-                  // Show the total completed activity time.
-                  Card(
-                    color: Colors.green.shade50,
-                    child: Padding(
-                      padding: const EdgeInsets.all(20),
-                      child: Column(
-                        children: [
-                          const Text(
-                            'Total Recorded Time',
-                            style: TextStyle(fontSize: 16),
-                          ),
-                          const SizedBox(height: 10),
-                          Text(
-                            _formatMinutes(_totalMinutes),
-                            style: const TextStyle(
-                              fontSize: 28,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.green,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-
-                  const SizedBox(height: 24),
-
+                  const SizedBox(height: 20),
                   Text(
-                    'Activities (${filtered.length})',
-                    style: const TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                    ),
+                    '${recordedDuration(total)} recorded',
+                    style: Theme.of(context).textTheme.headlineSmall,
                   ),
-
-                  const SizedBox(height: 12),
-
-                  if (filtered.isEmpty)
-                    const Padding(
-                      padding: EdgeInsets.all(24),
-                      child: Center(
-                        child: Text('No activities found for this category.'),
-                      ),
+                  Text(
+                    '${rows.where((r) => r['status'] == 'completed').length} completed activities',
+                  ),
+                  const SizedBox(height: 20),
+                  if (days.isEmpty)
+                    const Text(
+                      'Your recorded activities and reflections will appear here.',
                     ),
-
-                  // Display each saved activity.
-                  ...filtered.map((activity) {
-                    final title = activity['title']?.toString() ?? 'Activity';
-
-                    final status = activity['status']?.toString() ?? 'planned';
-
-                    final duration =
-                        (activity['duration_minutes'] as num?)?.toInt() ?? 0;
-
+                  ...days.map((key) {
+                    final date = DateTime.parse(key);
+                    final duration = rows.fold<Duration>(
+                      Duration.zero,
+                      (sum, row) =>
+                          sum +
+                          periodsOnDay(row, date, now: now).fold<Duration>(
+                            Duration.zero,
+                            (v, p) => v + p.duration,
+                          ),
+                    );
+                    final reflection = _reflections
+                        .where((r) => r['date'] == key)
+                        .firstOrNull;
                     return Card(
-                      margin: const EdgeInsets.only(bottom: 10),
                       child: ListTile(
-                        leading: const Icon(
-                          Icons.access_time,
-                          color: Colors.green,
+                        title: Text(key),
+                        leading: Text(
+                          reflectionMood(reflection?['mood']) ==
+                                  'No mood selected'
+                              ? '—'
+                              : reflectionMood(reflection?['mood']),
+                          style: const TextStyle(fontSize: 28),
                         ),
-                        title: Text(title),
                         subtitle: Text(
-                          '${_categoryName(activity['category_id'])}\n'
-                          '${_formatDate(activity['start_time']?.toString())}'
-                          ' • $status',
+                          '${recordedDuration(duration)} recorded${reflection == null ? '' : ' • Reflection saved'}',
                         ),
-                        isThreeLine: true,
-                        trailing: Text(
-                          _formatMinutes(duration),
-                          style: const TextStyle(fontWeight: FontWeight.bold),
-                        ),
+                        trailing: const Icon(Icons.chevron_right),
+                        onTap: () async {
+                          await Navigator.push<void>(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => TodayScreen(initialDay: date),
+                            ),
+                          );
+                          await _load();
+                        },
                       ),
                     );
                   }),

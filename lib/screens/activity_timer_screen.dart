@@ -113,197 +113,49 @@ class _ActivityTimerScreenState extends State<ActivityTimerScreen> {
     });
   }
 
-  Future<void> _start() async {
-    if (_finished || _running || _busy) return;
-
-    final now = DateTime.now();
-    final newStartedAt = _startedAt ?? now;
-
+  Future<void> _action(String action) async {
+    if (_busy) return;
     setState(() => _busy = true);
-
     try {
-      final updated = await DatabaseHelper.instance.saveTimerState(
-        widget.activityId,
-        status: 'running',
-        elapsedSeconds: _elapsed.inSeconds,
-        startedAt: newStartedAt.toIso8601String(),
-        resumedAt: now.toIso8601String(),
-      );
-
-      if (updated == 0) {
-        throw Exception('Activity was not found in SQLite.');
+      await DatabaseHelper.instance.changeTimer(widget.activityId, action);
+      _timer?.cancel();
+      await _loadActivity();
+      if (action == 'finish' && mounted) {
+        _message('Activity finished and saved.');
       }
-
-      if (!mounted) return;
-
-      setState(() {
-        _startedAt = newStartedAt;
-        _resumedAt = now;
-        _running = true;
-        _busy = false;
-      });
-
-      _startTicker();
     } catch (error) {
-      if (!mounted) return;
-
-      setState(() => _busy = false);
-      _message('Could not start timer: $error');
+      _message(error.toString().replaceFirst('Bad state: ', ''));
+    } finally {
+      if (mounted) setState(() => _busy = false);
     }
   }
 
-  Future<void> _pause() async {
-    if (!_running || _busy) return;
-
-    final elapsed = _currentElapsed;
-
-    // Stop the timer while saving so the displayed time
-    // matches what is stored in SQLite.
-    _timer?.cancel();
-
-    setState(() {
-      _busy = true;
-      _running = false;
-      _elapsed = elapsed;
-      _resumedAt = null;
-    });
-
-    try {
-      final updated = await DatabaseHelper.instance.saveTimerState(
-        widget.activityId,
-        status: 'paused',
-        elapsedSeconds: elapsed.inSeconds,
-        startedAt: _startedAt?.toIso8601String(),
-        resumedAt: null,
-      );
-
-      if (updated == 0) {
-        throw Exception('Activity was not found in SQLite.');
-      }
-
-      if (!mounted) return;
-      setState(() => _busy = false);
-    } catch (error) {
-      if (!mounted) return;
-
-      setState(() => _busy = false);
-      _message('Could not save paused timer: $error');
-    }
-  }
-
-  Future<void> _finish() async {
-    if (_activity == null || _finished || _busy) return;
-
-    if (_startedAt == null) {
-      _message('Start the timer first.');
-      return;
-    }
-
-    final elapsed = _currentElapsed;
-
-    _timer?.cancel();
-
-    setState(() {
-      _busy = true;
-      _running = false;
-      _elapsed = elapsed;
-      _resumedAt = null;
-    });
-
-    try {
-      final seconds = elapsed.inSeconds;
-      final minutes = (elapsed.inMilliseconds / 60000).ceil();
-
-      final updated = await DatabaseHelper.instance.updateActivity(
-        widget.activityId,
-        {
-          'start_time': _startedAt!.toIso8601String(),
-          'end_time': DateTime.now().toIso8601String(),
-          'duration_minutes': minutes,
-          'elapsed_seconds': seconds,
-          'timer_started_at': null,
-          'timer_resumed_at': null,
-          'status': 'completed',
-        },
-      );
-
-      if (updated == 0) {
-        throw Exception('Activity was not found in SQLite.');
-      }
-
-      if (!mounted) return;
-
-      setState(() {
-        _finished = true;
-        _busy = false;
-      });
-
-      _message('Activity finished and saved!');
-    } catch (error) {
-      if (!mounted) return;
-
-      setState(() => _busy = false);
-      _message('Could not finish activity: $error');
-    }
-  }
+  Future<void> _start() => _action('start');
+  Future<void> _pause() => _action('pause');
+  Future<void> _finish() => _action('finish');
 
   Future<void> _reset() async {
-    if (_finished || _busy) return;
-
+    if (_busy || _finished) return;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Reset timer?'),
-        content: const Text('This will clear the current timer session.'),
+        content: const Text(
+          'Clear this session? Completed history stays saved.',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
             child: const Text('Cancel'),
           ),
-          TextButton(
+          FilledButton(
             onPressed: () => Navigator.pop(context, true),
             child: const Text('Reset'),
           ),
         ],
       ),
     );
-
-    if (confirmed != true || !mounted) return;
-
-    setState(() => _busy = true);
-
-    try {
-      final updated = await DatabaseHelper.instance.saveTimerState(
-        widget.activityId,
-        status: 'planned',
-        elapsedSeconds: 0,
-        startedAt: null,
-        resumedAt: null,
-      );
-
-      if (updated == 0) {
-        throw Exception('Activity was not found in SQLite.');
-      }
-
-      _timer?.cancel();
-
-      if (!mounted) return;
-
-      setState(() {
-        _startedAt = null;
-        _resumedAt = null;
-        _elapsed = Duration.zero;
-        _running = false;
-        _busy = false;
-      });
-
-      _message('Timer reset.');
-    } catch (error) {
-      if (!mounted) return;
-
-      setState(() => _busy = false);
-      _message('Could not reset timer: $error');
-    }
+    if (confirmed == true && mounted) await _action('reset');
   }
 
   String _formatDuration(Duration duration) {
@@ -370,10 +222,7 @@ class _ActivityTimerScreenState extends State<ActivityTimerScreen> {
         : 'Paused';
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Activity Timer'),
-        backgroundColor: Colors.green.shade100,
-      ),
+      appBar: AppBar(title: const Text('Activity Timer')),
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(24),
@@ -391,7 +240,10 @@ class _ActivityTimerScreenState extends State<ActivityTimerScreen> {
 
               Text(
                 isTimed ? 'Planned: $plannedMinutes minutes' : 'Open Timer',
-                style: TextStyle(color: Colors.grey.shade700, fontSize: 15),
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  fontSize: 15,
+                ),
               ),
 
               const SizedBox(height: 48),
@@ -412,10 +264,10 @@ class _ActivityTimerScreenState extends State<ActivityTimerScreen> {
                               ? progress
                               : _finished
                               ? 1.0
-                              : null,
+                              : 0.0,
                           strokeWidth: 14,
                           strokeCap: StrokeCap.round,
-                          backgroundColor: Colors.green.shade100,
+
                           valueColor: AlwaysStoppedAnimation<Color>(
                             _finished ? Colors.green.shade700 : Colors.green,
                           ),
@@ -425,12 +277,18 @@ class _ActivityTimerScreenState extends State<ActivityTimerScreen> {
                       Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          Text(
-                            _formatDuration(displayDuration),
-                            style: const TextStyle(
-                              fontSize: 38,
-                              fontWeight: FontWeight.bold,
-                              letterSpacing: 1,
+                          SizedBox(
+                            width: 220,
+                            child: FittedBox(
+                              fit: BoxFit.scaleDown,
+                              child: Text(
+                                _formatDuration(displayDuration),
+                                style: const TextStyle(
+                                  fontSize: 38,
+                                  fontWeight: FontWeight.bold,
+                                  letterSpacing: 1,
+                                ),
+                              ),
                             ),
                           ),
 
@@ -440,7 +298,9 @@ class _ActivityTimerScreenState extends State<ActivityTimerScreen> {
                             isTimed ? 'Remaining' : 'Elapsed',
                             style: TextStyle(
                               fontSize: 15,
-                              color: Colors.grey.shade700,
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .onSurfaceVariant,
                             ),
                           ),
 
@@ -464,10 +324,17 @@ class _ActivityTimerScreenState extends State<ActivityTimerScreen> {
 
               if (isTimed)
                 Text(
-                  '${(progress! * 100).round()}% of planned time',
-                  style: TextStyle(color: Colors.grey.shade700),
+                  '${(progress! * 100).round()}% of goal - active time: ${_formatDuration(elapsed)}',
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
                 ),
 
+              if (isTimed)
+                const Text(
+                  'Tracking continues after the goal until you tap Finish.',
+                  textAlign: TextAlign.center,
+                ),
               const SizedBox(height: 36),
 
               if (!_finished)
@@ -514,20 +381,30 @@ class _ActivityTimerScreenState extends State<ActivityTimerScreen> {
                   ],
                 ),
 
-              if (_finished)
-                const Column(
-                  children: [
-                    Icon(Icons.check_circle, size: 48, color: Colors.green),
-                    SizedBox(height: 12),
-                    Text(
-                      'Activity completed!',
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w600,
+              AnimatedSwitcher(
+                duration: MediaQuery.of(context).disableAnimations
+                    ? Duration.zero
+                    : const Duration(milliseconds: 250),
+                child: !_finished
+                    ? const SizedBox.shrink()
+                    : const Column(
+                        children: [
+                          Icon(
+                            Icons.check_circle,
+                            size: 48,
+                            color: Colors.green,
+                          ),
+                          SizedBox(height: 12),
+                          Text(
+                            'Activity completed!',
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
                       ),
-                    ),
-                  ],
-                ),
+              ),
             ],
           ),
         ),
