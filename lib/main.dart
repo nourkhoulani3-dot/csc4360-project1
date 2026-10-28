@@ -3,31 +3,106 @@ import 'package:flutter/material.dart';
 import 'screens/activity_form_screen.dart';
 import 'screens/saved_activities_screen.dart';
 import 'screens/history_screen.dart';
+import 'screens/settings_screen.dart';
+import 'services/app_settings.dart';
 
 void main() {
+  WidgetsFlutterBinding.ensureInitialized();
   runApp(const PlotApp());
 }
 
-class PlotApp extends StatelessWidget {
+class PlotApp extends StatefulWidget {
   const PlotApp({super.key});
 
   @override
+  State<PlotApp> createState() => _PlotAppState();
+}
+
+class _PlotAppState extends State<PlotApp> {
+  late Future<AppSettings> _settings;
+
+  @override
+  void initState() {
+    super.initState();
+    _settings = AppSettings.load();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Plot',
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.green),
-        useMaterial3: true,
-      ),
-      home: const PlotHomeScreen(),
+    return FutureBuilder<AppSettings>(
+      future: _settings,
+      builder: (context, snapshot) {
+        if (!snapshot.hasData) {
+          return MaterialApp(
+            debugShowCheckedModeBanner: false,
+            home: Scaffold(
+              body: Center(
+                child: snapshot.hasError
+                    ? TextButton(
+                        onPressed: () {
+                          setState(() {
+                            _settings = AppSettings.load();
+                          });
+                        },
+                        child: const Text(
+                          'Settings failed to load. Tap to retry.',
+                        ),
+                      )
+                    : const CircularProgressIndicator(),
+              ),
+            ),
+          );
+        }
+
+        final settings = snapshot.data!;
+
+        return AnimatedBuilder(
+          animation: settings,
+          builder: (context, child) {
+            return MaterialApp(
+              title: 'Plot',
+              debugShowCheckedModeBanner: false,
+              themeMode: settings.themeMode,
+              theme: ThemeData(
+                colorScheme: ColorScheme.fromSeed(
+                  seedColor: Colors.green,
+                ),
+                useMaterial3: true,
+              ),
+              darkTheme: ThemeData(
+                colorScheme: ColorScheme.fromSeed(
+                  seedColor: Colors.green,
+                  brightness: Brightness.dark,
+                ),
+                useMaterial3: true,
+              ),
+              builder: (context, child) {
+                final media = MediaQuery.of(context);
+
+                return MediaQuery(
+                  data: media.copyWith(
+                    disableAnimations: media.disableAnimations ||
+                        !settings.animationsEnabled,
+                  ),
+                  child: child!,
+                );
+              },
+              home: PlotHomeScreen(settings: settings),
+            );
+          },
+        );
+      },
     );
   }
 }
 
-// Stateful because the selected tab changes.
 class PlotHomeScreen extends StatefulWidget {
-  const PlotHomeScreen({super.key});
+  const PlotHomeScreen({
+    super.key,
+    required this.settings,
+  });
+
+  final AppSettings settings;
 
   @override
   State<PlotHomeScreen> createState() => _PlotHomeScreenState();
@@ -39,18 +114,10 @@ class _PlotHomeScreenState extends State<PlotHomeScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      // Build the selected screen when switching tabs.
       body: switch (_selectedTab) {
         0 => const TodayScreen(),
         1 => const HistoryScreen(),
-        _ => const Scaffold(
-            appBar: null,
-            body: SafeArea(
-              child: Center(
-                child: Text('Settings — next step'),
-              ),
-            ),
-          ),
+        _ => SettingsScreen(settings: widget.settings),
       },
       bottomNavigationBar: NavigationBar(
         selectedIndex: _selectedTab,
@@ -81,7 +148,6 @@ class _PlotHomeScreenState extends State<PlotHomeScreen> {
   }
 }
 
-// We'll add your timeline and reflection here next.
 class TodayScreen extends StatelessWidget {
   const TodayScreen({super.key});
 
@@ -99,7 +165,7 @@ class TodayScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Plot • Today'),
+        title: const Text('Plot - Today'),
       ),
       body: ListView(
         padding: const EdgeInsets.all(20),
