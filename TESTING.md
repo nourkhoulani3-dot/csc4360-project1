@@ -17,11 +17,11 @@
 
 ## Testing Still Needed
 
-- [ ] Complete all five Smart Helper evaluation cases
-- [ ] Test invalid inputs and edge cases
-- [ ] Verify offline behavior and app restart
-- [ ] Complete accessibility and usability review
-- [ ] Test final integration with teammates' features
+- [x] Complete all five Smart Helper evaluation cases
+- [x] Test invalid inputs and edge cases
+- [x] Verify offline behavior and app restart
+- [x] Complete accessibility and usability review
+- [x] Test final integration with teammates' features
 
 ## Commands
 

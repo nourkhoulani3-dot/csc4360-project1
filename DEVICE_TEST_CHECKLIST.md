@@ -1,33 +1,62 @@
-# Plot device checks — fill in actual results
 
-Device 1 / Android version / date: ____________________
-Device 2 / Android version / date: ____________________
-Tester(s): ____________________
+# Plot Device Testing Checklist
 
-Run all rows on both devices. Record Pass, Fail, or Not tested; do not prefill Pass.
+## Device Information
 
-| Check | Expected behavior | Device 1 | Device 2 |
+**Device 1:** Google Pixel 7 Pro  
+**Device 2:** Google Pixel 8  
+**Android versions:** To be confirmed  
+**Testers:** Bryce and Nour  
+**Date:** October 30, 2026
+
+## Checklist Preparation
+
+- [x] Device names entered
+- [x] All test cases documented
+- [x] Expected behaviors documented
+- [x] Smart Helper evaluation cases included
+- [x] Offline and restart scenarios included
+- [x] Accessibility and navigation checks included
+- [x] Flutter static analysis completed successfully
+
+## Device Test Results
+
+| Check | Expected Behavior | Pixel 7 Pro | Pixel 8 |
 | --- | --- | --- | --- |
-| Existing data after update | Old activities/categories/reflections remain | | |
-| Category CRUD | Add, read, rename, recolor, delete; activity remains Uncategorized | | |
-| Activity CRUD | Add, read, edit title/notes/category/times, confirm deletion | | |
-| Validation | Empty name, end before start, future finish and overlapping times show errors | | |
-| Helper five types | AI_FEATURE.md expected values and explanation | | |
-| Helper user control | Apply, dismiss, override to 10, open timer, per-category disable persists | | |
-| Default duration | Set 40, open new timed activity: 40 is selected | | |
-| Timer | Start, progress, pause excludes waiting time, resume, finish persists | | |
-| One running timer | A second start is rejected until first pauses/finishes | | |
-| Reset | Confirmation clears unfinished elapsed time without deleting completed history | | |
-| Restart while running | Close app, reopen: elapsed time includes closed interval | | |
-| Restart while paused | Close/reopen: elapsed time does not grow | | |
-| Manual past entry | A valid unlogged gap can be filled and appears in timeline | | |
-| Overnight sleep | Past manual Sleep 23:30–01:00 shows 30min then 60min; one record | | |
-| Filter and aggregate | Compare two known 10min/20min records: selected-category total 30min | | |
-| Reflection | Long text saves, optional emoji, edit, delete, discard confirmation | | |
-| History mood | Past date shows selected emoji and opens correct day | | |
-| Offline / restart | Airplane mode: CRUD/settings/reflections remain available after restart | | |
-| Accessibility | Larger system text, dark/light themes, clear labels, usable touch targets | | |
-| Navigation | Today / History / Settings and Android Back work; no layout overflow | | |
-| Empty state | No entries/categories/matching filter gives clear feedback | | |
+| Existing data after update | Old activities, categories, and reflections remain | Not verified | Not verified |
+| Category CRUD | Add, read, rename, recolor, delete; activities remain Uncategorized | Not verified | Not verified |
+| Activity CRUD | Add, read, edit title, notes, category, times; confirm deletion | Not verified | Not verified |
+| Validation | Invalid names, times, and overlapping entries display errors | Not verified | Not verified |
+| Helper five types | Results match the five cases in AI_FEATURE.md | Not verified | Not verified |
+| Helper user control | Apply, dismiss, override, open timer, disable preference persists | Not verified | Not verified |
+| Default duration | Setting 40 minutes makes it the default | Not verified | Not verified |
+| Timer | Start, pause, resume, finish, and persistence work | Not verified | Not verified |
+| One running timer | A second running timer is prevented | Not verified | Not verified |
+| Reset | Confirmation clears unfinished time without deleting history | Not verified | Not verified |
+| Restart while running | Elapsed time includes the closed interval | Not verified | Not verified |
+| Restart while paused | Paused time does not increase | Not verified | Not verified |
+| Manual past entry | Valid past activity appears in timeline | Not verified | Not verified |
+| Overnight sleep | 23:30–01:00 displays correctly across both dates | Not verified | Not verified |
+| Filter and aggregate | Two activities of 10 and 20 minutes total 30 minutes | Not verified | Not verified |
+| Reflection | Long text, emoji, editing, deleting, and discard confirmation work | Not verified | Not verified |
+| History mood | Saved emoji appears on the correct date | Not verified | Not verified |
+| Offline / restart | Data and settings remain available offline after restarting | Not verified | Not verified |
+| Accessibility | Large text, themes, labels, and touch targets are usable | Not verified | Not verified |
+| Navigation | Today, History, Settings, and Android Back work | Not verified | Not verified |
+| Empty state | Empty activities, categories, and filters show feedback | Not verified | Not verified |
 
-Save screenshots of the important outcomes and record failures/fixes honestly. Database-error feedback is implemented but a real write-failure scenario has not been induced here. Device restart and plugin behavior need the actual Android checks; pure logic tests do not replace them.
+## Current Verification
+
+- [x] Flutter project opened successfully
+- [x] Latest main branch pulled from GitHub
+- [x] Flutter dependencies installed
+- [x] `flutter analyze` completed with no issues
+- [x] Plot launched successfully on the Android emulator
+
+## Final Notes
+
+The device testing checklist is fully prepared for the Google Pixel 7 Pro and Google Pixel 8.
+
+The full device tests still require verification on both devices. Results should be updated to Pass or Fail after execution, with screenshots and bug notes where appropriate.
+
+Database write-failure simulation and complete restart testing remain unverified.
